@@ -1,0 +1,462 @@
+CASOS DE TESTE — MAGAZORD
+Autor: Cristiano Schroeder
+
+1. OBJETIVO E ESCOPO
+
+Documentar os 21 cenários automatizados das partes de API,
+checkout e upload de CSV.
+
+Tipos de evidência:
+- Integração real: chamadas aos ambientes públicos.
+- Interface: interação com os sites pelo Chromium.
+- Simulação: avaliação dos helpers com entradas controladas.
+
+As partes de mobile e integrações com marketplaces são
+exclusivamente teóricas e não integram esta suíte.
+
+
+2. PRÉ-CONDIÇÕES GERAIS
+
+- Dependências do projeto e Chromium instalados.
+- Execução a partir da raiz do projeto.
+- Acesso aos ambientes públicos para os testes de integração.
+- Cota disponível para a consulta sem autenticação do GitHub.
+
+Os testes simulados do gerenciador de token utilizam uma
+instância nova e dados próprios em cada cenário.
+
+Os testes de interface utilizam contextos isolados.
+No checkout, cada cenário prepara seu próprio carrinho.
+
+
+3. PARTE 1 — API
+
+Arquivo: parte1-api/questao1.1/testes/api.spec.js
+Execução: npm run test:parte1
+
+
+API-01 — Headers de rate limiting do GitHub
+Tipo: integração real.
+
+Passos:
+1. Consultar GET https://api.github.com/users/github sem token.
+2. Registrar status e headers de rate limiting no relatório.
+3. Validar corpo, formato dos headers e consistência numérica.
+
+Resultado esperado:
+- HTTP 200.
+- Campo login igual a "github".
+- Headers limit, remaining e reset presentes e numéricos.
+- Limite igual a 60.
+- Saldo entre zero e o limite.
+- Data do servidor válida.
+- Reset entre zero e 3.600 segundos após a data do servidor.
+
+Limite:
+Não comprova o bloqueio após esgotar a cota.
+
+
+API-02 — Detectar cota esgotada com HTTP 403
+Tipo: simulação do helper.
+
+Dados:
+Status 403 e x-ratelimit-remaining igual a "0".
+
+Passos:
+1. Chamar isPrimaryRateLimitExceeded com os dados.
+2. Conferir o retorno.
+
+Resultado esperado:
+Retorno true.
+
+
+API-03 — Detectar cota esgotada com HTTP 429
+Tipo: simulação do helper.
+
+Dados:
+Status 429 e x-ratelimit-remaining igual a "0".
+
+Passos:
+1. Chamar isPrimaryRateLimitExceeded com os dados.
+2. Conferir o retorno.
+
+Resultado esperado:
+Retorno true.
+
+
+API-04 — Não classificar HTTP 403 com saldo como cota esgotada
+Tipo: simulação do helper.
+
+Dados:
+Status 403 e x-ratelimit-remaining igual a "25".
+
+Passos:
+1. Chamar isPrimaryRateLimitExceeded com os dados.
+2. Conferir o retorno.
+
+Resultado esperado:
+Retorno false.
+
+Limite:
+O resultado não identifica a causa do HTTP 403 nem descarta
+outras formas de limitação.
+
+
+API-05 — Última requisição permitida
+Tipo: simulação do helper.
+
+Dados:
+Status 200 e x-ratelimit-remaining igual a "0".
+
+Passos:
+1. Chamar isPrimaryRateLimitExceeded com os dados.
+2. Conferir o retorno.
+
+Resultado esperado:
+Retorno false, pois a requisição representada foi bem-sucedida.
+
+
+API-06 — Header de saldo ausente
+Tipo: simulação do helper.
+
+Dados:
+Status 403 e objeto de headers vazio.
+
+Passos:
+1. Chamar isPrimaryRateLimitExceeded com os dados.
+2. Conferir o retorno.
+
+Resultado esperado:
+Retorno false, pois faltam os sinais exigidos pelo helper.
+
+
+API-07 — Autenticação e reutilização de token
+Tipo: integração real com DummyJSON.
+
+Dados:
+Credenciais públicas emilys / emilyspass.
+
+Passos:
+1. Criar clientes HTTP separados para login e consultas.
+2. Consultar GET /auth/me sem token.
+3. Obter token pelo gerenciador, via POST /auth/login.
+4. Consultar /auth/me com Authorization: Bearer.
+5. Solicitar novamente o token ao mesmo gerenciador.
+6. Repetir a consulta autenticada.
+7. Conferir a quantidade de chamadas de login.
+8. Liberar os clientes HTTP.
+
+Resultado esperado:
+- Acesso sem token retorna HTTP 401.
+- Login retorna HTTP 200 e token utilizável.
+- Consultas autenticadas retornam HTTP 200.
+- Primeira consulta confirma username "emilys" e id 1.
+- Segunda consulta confirma username "emilys".
+- A função de login é chamada uma única vez.
+
+Limite:
+Demonstra reutilização dentro de um teste, não compartilhamento
+de token entre testes independentes.
+
+
+API-08 — Validade local e renovação no limite
+Tipo: simulação com relógio controlado.
+
+Dados:
+TTL de 120.000 ms e login que retorna tokens identificáveis.
+
+Passos:
+1. Obter o primeiro token no instante zero.
+2. Avançar o relógio para 119.999 ms e solicitar o token.
+3. Avançar para 120.000 ms e solicitar o token.
+4. Solicitar novamente sem avançar o relógio.
+
+Resultado esperado:
+- Primeiro login retorna token-simulado-1.
+- Antes do vencimento, o token é reutilizado sem novo login.
+- No vencimento, retorna token-simulado-2.
+- O novo token é reutilizado.
+- Total de duas chamadas de login.
+
+Limite:
+Valida TTL local; não altera nem verifica a expiração no servidor.
+
+
+API-09 — Invalidação explícita do cache
+Tipo: simulação do helper.
+
+Passos:
+1. Obter token-simulado-1.
+2. Executar invalidate().
+3. Solicitar outro token.
+
+Resultado esperado:
+- Retorno de token-simulado-2.
+- Total de duas chamadas de login.
+
+Limite:
+Não simula recebimento de HTTP 401 nem recuperação automática.
+
+
+API-10 — Falha na renovação e tentativa posterior
+Tipo: simulação do helper.
+
+Passos:
+1. Obter o primeiro token.
+2. Avançar o relógio até o vencimento.
+3. Simular falha na segunda chamada de login.
+4. Solicitar o token e verificar a rejeição.
+5. Solicitar novamente, permitindo sucesso no terceiro login.
+
+Resultado esperado:
+- Erro "Serviço de autenticação indisponível" é propagado.
+- A chamada com falha não devolve o token expirado.
+- A chamada posterior retorna token-simulado-3.
+- Não há repetição automática indefinida.
+
+
+API-11 — Token vazio no retorno do login
+Tipo: simulação do helper.
+
+Passos:
+1. Configurar o login para retornar uma string vazia.
+2. Solicitar o token.
+
+Resultado esperado:
+Rejeição com "Login não retornou um token válido.".
+
+
+4. PARTE 2 — CHECKOUT
+
+Arquivo: parte2-e2e/questao2.1/testes/checkout-flow.spec.js
+Execução: npm run test:parte2
+
+Ambiente: https://www.saucedemo.com
+Credenciais públicas: standard_user / secret_sauce.
+
+Após cada cenário:
+Limpeza explícita de armazenamento local, armazenamento de
+sessão e cookies, além do descarte do contexto pelo Playwright.
+
+
+E2E-01 — Finalizar compra de dois produtos
+Tipo: interface.
+
+Dados:
+- Sauce Labs Backpack: US$ 29,99.
+- Sauce Labs Bike Light: US$ 9,99.
+- Nome, sobrenome e CEP sintéticos gerados na execução.
+
+Passos:
+1. Efetuar login e conferir acesso ao catálogo.
+2. Adicionar os dois produtos.
+3. Conferir o indicador de dois itens.
+4. Abrir o carrinho e conferir os nomes dos produtos.
+5. Iniciar checkout e preencher os dados.
+6. Conferir os produtos e valores no resumo.
+7. Finalizar a compra.
+8. Conferir a página de conclusão.
+
+Resultado esperado:
+- Produtos esperados no carrinho e no resumo.
+- Subtotal US$ 39,98.
+- Imposto US$ 3,20.
+- Total US$ 43,18.
+- URL termina em /checkout-complete.html.
+- Mensagem "Thank you for your order!".
+- Indicador de itens do carrinho ausente.
+
+Limite:
+Não comprova cobrança real, envio de email ou persistência
+de pedido em backend.
+
+
+E2E-02 — Impedir avanço sem nome
+Tipo: interface, cenário negativo.
+
+Passos:
+1. Efetuar login e adicionar Sauce Labs Backpack.
+2. Abrir o carrinho e iniciar checkout.
+3. Preencher sobrenome e CEP, mantendo nome vazio.
+4. Tentar continuar.
+
+Resultado esperado:
+- Mensagem "Error: First Name is required".
+- Permanência em /checkout-step-one.html.
+- Botão Continue permanece visível.
+
+
+E2E-03 — Impedir avanço sem sobrenome
+Tipo: interface, cenário negativo.
+
+Passos:
+1. Efetuar login e adicionar Sauce Labs Backpack.
+2. Abrir o carrinho e iniciar checkout.
+3. Preencher nome e CEP, mantendo sobrenome vazio.
+4. Tentar continuar.
+
+Resultado esperado:
+- Mensagem "Error: Last Name is required".
+- Permanência em /checkout-step-one.html.
+- Botão Continue permanece visível.
+
+
+E2E-04 — Impedir avanço sem CEP
+Tipo: interface, cenário negativo.
+
+Passos:
+1. Efetuar login e adicionar Sauce Labs Backpack.
+2. Abrir o carrinho e iniciar checkout.
+3. Preencher nome e sobrenome, mantendo CEP vazio.
+4. Tentar continuar.
+
+Resultado esperado:
+- Mensagem "Error: Postal Code is required".
+- Permanência em /checkout-step-one.html.
+- Botão Continue permanece visível.
+
+
+5. PARTE 3 — CSV
+
+Arquivo: parte3-arquivos/questao3.1/testes/csv-upload.spec.js
+Execução: npm run test:parte3
+
+Ambiente: https://the-internet.herokuapp.com/upload
+
+Procedimento comum:
+1. Preparar o conteúdo e um nome único.
+2. Salvar na pasta de resultados do teste.
+3. Anexar o arquivo ao relatório.
+4. Abrir /upload, selecionar o arquivo e enviar.
+5. Conferir a confirmação e o nome exibido.
+
+
+CSV-01 — Upload de 10 registros
+Tipo: interface com arquivo gerado.
+
+Passos:
+1. Gerar CSV com 10 registros, além do cabeçalho.
+2. Conferir cabeçalho e contagem local.
+3. Executar o procedimento comum de upload.
+
+Resultado esperado:
+- Cabeçalho nome,email,idade,cidade.
+- Contagem local de 10 registros.
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+
+CSV-02 — Upload de 100 registros
+Tipo: interface com arquivo gerado.
+
+Passos:
+1. Gerar CSV com 100 registros, além do cabeçalho.
+2. Conferir cabeçalho e contagem local.
+3. Executar o procedimento comum de upload.
+
+Resultado esperado:
+- Cabeçalho nome,email,idade,cidade.
+- Contagem local de 100 registros.
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+
+CSV-03 — Upload de 1.000 registros
+Tipo: interface com arquivo gerado.
+
+Passos:
+1. Gerar CSV com 1.000 registros, além do cabeçalho.
+2. Conferir cabeçalho e contagem local.
+3. Executar o procedimento comum de upload.
+
+Resultado esperado:
+- Cabeçalho nome,email,idade,cidade.
+- Contagem local de 1.000 registros.
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+Limite:
+Não comprova processamento de 1.000 registros pelo servidor
+nem constitui teste de carga.
+
+
+CSV-04 — Aceitação de arquivo vazio pelo uploader
+Tipo: caracterização do comportamento da interface.
+
+Passos:
+1. Preparar arquivo com zero bytes.
+2. Executar o procedimento comum de upload.
+
+Resultado esperado no ambiente observado:
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+Limite:
+A aprovação comprova aceitação do envio, não validade do CSV.
+
+
+CSV-05 — Aceitação de CSV com aspas não fechadas
+Tipo: caracterização do comportamento da interface.
+
+Passos:
+1. Preparar cabeçalho e um registro com aspas não fechadas.
+2. Executar o procedimento comum de upload.
+
+Resultado esperado no ambiente observado:
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+Limite:
+Não comprova que o servidor interpretou ou validou a estrutura.
+
+
+CSV-06 — Aceitação de dados inválidos pelo uploader
+Tipo: caracterização do comportamento da interface.
+
+Passos:
+1. Preparar CSV com email-invalido e idade -5.
+2. Executar o procedimento comum de upload.
+
+Resultado esperado no ambiente observado:
+- Mensagem "File Uploaded!".
+- Nome exibido igual ao nome enviado.
+
+Limite:
+Os dados são inválidos conforme as premissas propostas.
+O uploader não demonstra aplicação dessas regras de negócio.
+
+
+6. RESULTADOS E RASTREABILIDADE
+
+Execução local conjunta:
+- Comando: npm test.
+- Resultado observado: 21 aprovados.
+- API: 11.
+- Checkout: 4.
+- CSV: 6.
+- Um worker.
+- Duração observada: 36,8 segundos.
+
+Os IDs deste documento são identificadores documentais.
+A correspondência com o código é feita pelo cenário descrito;
+os IDs não foram adicionados aos títulos dos testes.
+
+Relatório HTML: playwright-report.
+Artefatos da execução: test-results.
+CI: configurado, ainda sem execução confirmada nesta etapa.
+
+
+7. COBERTURA NÃO IMPLEMENTADA
+
+- Exaustão real e recuperação da cota do GitHub.
+- Expiração do JWT no servidor.
+- Recuperação automática após HTTP 401.
+- Compartilhamento de token entre testes por fixture de worker.
+- Cupons, cobrança real e envio de email.
+- Processamento e persistência dos registros CSV.
+- Validação de duplicatas e relacionamentos na importação.
+- Automação mobile.
+- Integração executável com marketplaces.
+
+Esses pontos são discutidos nas respostas teóricas quando
+aplicáveis e não são apresentados como testes executados.
