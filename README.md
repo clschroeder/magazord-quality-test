@@ -29,7 +29,7 @@ A execução local foi validada no Windows 10 Pro 22H2.
 Isso descreve o ambiente observado, não uma garantia de
 suporte oficial do Playwright a esse sistema operacional.
 
-O workflow de CI está configurado para Ubuntu com Node.js 22.
+O workflow de CI está configurado para Ubuntu 24.04 com Node.js 22.
 
 ## Instalação
 
@@ -307,8 +307,10 @@ Etapas:
 6. Publicar o relatório HTML por 30 dias, quando a execução
    não for cancelada.
 
-Status: workflow configurado, ainda sem execução no GitHub
-Actions confirmada nesta etapa.
+Status: execução concluída com sucesso no GitHub Actions.
+O workflow utiliza Ubuntu 24.04, Node.js 22 e Chromium.
+
+Histórico: https://github.com/clschroeder/magazord-quality-test/actions
 
 ## Evidência local
 

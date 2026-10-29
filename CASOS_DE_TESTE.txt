@@ -443,7 +443,9 @@ os IDs não foram adicionados aos títulos dos testes.
 
 Relatório HTML: playwright-report.
 Artefatos da execução: test-results.
-CI: configurado, ainda sem execução confirmada nesta etapa.
+CI: execução concluída com sucesso no GitHub Actions.
+Ambiente: Ubuntu 24.04, Node.js 22 e Chromium.
+Histórico: https://github.com/clschroeder/magazord-quality-test/actions
 
 
 7. COBERTURA NÃO IMPLEMENTADA
